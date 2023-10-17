@@ -13,6 +13,7 @@ interface Currency {
   contract: any;
   reserve: bigint;
   balance: bigint;
+  allowance: bigint;
 }
 
 export default class SwapForm extends Component<{
@@ -26,6 +27,7 @@ export default class SwapForm extends Component<{
     currencyOut: Currency,
     error?: string,
   }> {
+  private readonly MAX_ALLOWANCE = BigInt('115792089237316195423570985008687907853269984665640564039457584007913129639935')
   private busdContract: any;
   private wbtcContract: any;
   private pairContract: any;
@@ -50,7 +52,8 @@ export default class SwapForm extends Component<{
       decimals: 0,
       contract: this.wbtcContract,
       reserve: BigInt(0),
-      balance: BigInt(0)
+      balance: BigInt(0),
+      allowance: BigInt(0)
     };
     this.busd = {
       name: 'BUSD',
@@ -59,7 +62,8 @@ export default class SwapForm extends Component<{
       decimals: 0,
       contract: busdContract,
       reserve: BigInt(0),
-      balance: BigInt(0)
+      balance: BigInt(0),
+      allowance: BigInt(0)
     };
     this.state = ({
       currencyIn: this.busd,
@@ -77,12 +81,16 @@ export default class SwapForm extends Component<{
     const [reserve1, reserve2] = await this.pairContract.read.getReserves();
     const busdBalance = await this.busdContract.read.balanceOf([this.props.address]);
     const wbtcBalance = await this.wbtcContract.read.balanceOf([this.props.address]);
+    const wbtcAllowance = await this.wbtcContract.read.allowance([this.props.address, routerContract.contract])
+    const busdAllowance = await this.busdContract.read.allowance([this.props.address, routerContract.contract]);
     this.wbtc.decimals = wbtcDecimals;
     this.wbtc.reserve = reserve2;
     this.wbtc.balance = wbtcBalance;
+    this.wbtc.allowance = wbtcAllowance;
     this.busd.decimals = busdDecimals;
     this.busd.reserve = reserve1;
     this.busd.balance = busdBalance;
+    this.busd.allowance = busdAllowance;
   }
 
   render() {
@@ -94,18 +102,17 @@ export default class SwapForm extends Component<{
       const date = new Date();
       const deadline = Math.floor(new Date(date.setMinutes(date.getMinutes() + 5)).getTime() / 1000);
       const amountOut = parseUnits(this.state.currencyOut.amount, this.state.currencyOut.decimals);
-      if (amountOut >= this.state.currencyOut.reserve) {
-        this.setState({error: "You're trying to swap an amount bigger than the reserve"})
-        return;
-      }
       const amountIn = parseUnits(this.state.currencyIn.amount, this.state.currencyIn.decimals);
-      if (amountIn > this.state.currencyIn.balance) {
-        this.setState({error: `You don't have enough ${this.state.currencyIn.name}`})
+      if(amountIn <= 0 || amountOut <= 0){
+        this.setState({error: "You must input a valid amount"});
         return;
       }
-      await this.state.currencyIn.contract.write.approve([routerContract.contract, amountIn]);
+      if (this.state.currencyIn.allowance < amountIn) {
+        await this.state.currencyIn.contract.write.approve([routerContract.contract, this.MAX_ALLOWANCE]);
+      }
+      let transaction;
       if (this.activeCurrency === 'currencyIn') {
-        await this.routerContract.write.swapExactTokensForTokens([
+        transaction = await this.routerContract.write.swapExactTokensForTokens([
           amountIn,
           amountOut,
           [this.state.currencyIn.address, this.state.currencyOut.address],
@@ -113,14 +120,15 @@ export default class SwapForm extends Component<{
           deadline
         ]);
       } else {
-        await this.routerContract.write.swapTokensForExactTokens([
+        transaction = await this.routerContract.write.swapTokensForExactTokens([
           amountOut,
           amountIn,
           [this.state.currencyIn.address, this.state.currencyOut.address],
           this.props.address,
           deadline
-        ])
+        ]);
       }
+      await this.props.publicClient.waitForTransactionReceipt({hash: transaction})
       await this.refreshCurrencies();
     }
 
@@ -159,6 +167,10 @@ export default class SwapForm extends Component<{
     currencyIn.amount = value;
     const currencyOut = this.state.currencyOut;
     currencyOut.amount = formatUnits(amountOut, this.state.currencyOut.decimals);
+    if (amountIn > this.state.currencyIn.balance) {
+      this.setState({error: "You don't have enough tokens"});
+      currencyOut.amount = '';
+    }
     this.setState({
       currencyIn,
       currencyOut
@@ -175,6 +187,10 @@ export default class SwapForm extends Component<{
     currencyIn.amount = formatUnits(amountIn, this.state.currencyIn.decimals);
     const currencyOut = this.state.currencyOut;
     currencyOut.amount = value;
+    if (amountOut > this.state.currencyOut.reserve) {
+      this.setState({error: "You're trying to swap an amount bigger than the reserve"});
+      currencyIn.amount = '';
+    }
     this.setState({
       currencyIn,
       currencyOut
