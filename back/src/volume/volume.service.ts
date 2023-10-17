@@ -29,4 +29,8 @@ export class VolumeService {
   async update(date: Date, volume: { amount: string; transactions: number }) {
     await this.volumeRepository.update({ date }, volume);
   }
+
+  async deleteAll() {
+    await this.volumeRepository.clear();
+  }
 }

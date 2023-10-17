@@ -5,6 +5,7 @@ import { TransferEntity } from './transfer.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ContractService } from '../contract/contract.service';
+import {VolumeService} from "../volume/volume.service";
 
 @Injectable()
 export class BusdService {
@@ -14,6 +15,7 @@ export class BusdService {
     @InjectRepository(TransferEntity)
     private transferRepository: Repository<TransferEntity>,
     private readonly contractService: ContractService,
+    private readonly volumeService: VolumeService,
   ) {}
 
   async getLastActions() {
@@ -91,5 +93,6 @@ export class BusdService {
     this.allowanceRepository.clear();
     this.transferRepository.clear();
     this.contractService.deleteAll();
+    this.volumeService.deleteAll();
   }
 }
